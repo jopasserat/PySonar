@@ -3,33 +3,18 @@
 
 ### Base Image
 # Setup up a base image to use in build and runtime images
-FROM openmined/pysyft:hydrogen AS base
+FROM continuumio/miniconda3 AS base
 
-EXPOSE 8888
-CMD ["jupyter", "notebook", "--config=./jupyter_notebook_config.py", "--allow-root"]
+# Setup workspace environment
+RUN apt-get update && apt-get install -y gcc libgmp3-dev libmpfr-dev libmpc-dev python3-dev python3-pip
+RUN conda install jupyter notebook
 
 # Intermediate build container
-FROM base AS build
+#FROM base as build
 WORKDIR /pysonar
 
-# Install build OS packages
-RUN apk add --no-cache \
-            python3 \
-            python3-dev \
-            alpine-sdk \
-            nodejs \
-            nodejs-npm \
-            git \
-            linux-headers \
-            lapack-dev \
-            gfortran \
-            gmp-dev \
-            gmp-dev \
-            mpfr-dev \
-            mpc1-dev
-
-#Pysonar image
-FROM build AS pysonar
+# Pysonar image
+FROM base AS pysonar
 
 # Setup workdir and copy requirements file
 COPY requirements.txt /pysonar
@@ -42,8 +27,22 @@ RUN ["pip3", "install", "-r", "/pysonar/requirements.txt"]
 COPY . /pysonar
 RUN ["python3", "setup.py", "install"]
 
+# Install nvm with node and npm
+ENV NVM_DIR /usr/local/nvm
+RUN mkdir -p $NVM_DIR
+RUN wget -qO- https://raw.githubusercontent.com/nvm-sh/nvm/v0.34.0/install.sh | bash \
+    && . $NVM_DIR/nvm.sh \
+    && nvm install v8 \
+    && nvm alias default v8 \
+    && nvm use default
+
+ENV NODE_VERSION 8.16.0
+ENV NODE_PATH $NVM_DIR/versions/node/v$NODE_VERSION/lib/node_modules
+ENV PATH $NVM_DIR/versions/node/v$NODE_VERSION/bin:$PATH
+
 # import abi via NPM module
-RUN ["make", "import-abi"]
+#RUN ["make", "import-abi"]
+RUN npm install
 
 # Runtime image
 FROM base AS runtime
@@ -55,3 +54,12 @@ COPY jupyter_notebook_config.py /notebooks/
 
 # Copy artifacts from pysonar image
 COPY --from=pysonar /pysonar/ /pysonar/
+
+# Create jupyter notebook workspace
+ENV WORKSPACE /workspace
+RUN mkdir $WORKSPACE
+WORKDIR $WORKSPACE
+
+EXPOSE 8888
+CMD ["jupyter", "notebook", "--config=./jupyter_notebook_config.py", "--allow-root"]
+
